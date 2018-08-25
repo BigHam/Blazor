@@ -1,8 +1,9 @@
-﻿// Copyright (c) .NET Foundation. All rights reserved.
+// Copyright (c) .NET Foundation. All rights reserved.
 // Licensed under the Apache License, Version 2.0. See License.txt in the project root for license information.
 
 using System.Linq;
 using Microsoft.AspNetCore.Razor.Language;
+using Microsoft.AspNetCore.Razor.Language.Extensions;
 using Microsoft.AspNetCore.Razor.Language.Intermediate;
 
 namespace Microsoft.AspNetCore.Blazor.Razor
@@ -130,38 +131,63 @@ namespace Microsoft.AspNetCore.Blazor.Razor
                 // node to the rather simpler form that property nodes usually have.
                 for (var i = 0; i < attribute.Children.Count; i++)
                 {
+                    IntermediateNode child = null;
                     if (attribute.Children[i] is HtmlAttributeValueIntermediateNode htmlValue)
                     {
-                        attribute.Children[i] = new HtmlContentIntermediateNode()
+                        child = new HtmlContentIntermediateNode()
                         {
-                            Children =
-                            {
-                                htmlValue.Children.Single(),
-                            },
                             Source = htmlValue.Source,
                         };
+
+                        for (var j = 0; j < htmlValue.Children.Count; j++)
+                        {
+                            child.Children.Add(htmlValue.Children[j]);
+                        }
+                    }
+                    else if (
+                        attribute.Children[i] is CSharpExpressionAttributeValueIntermediateNode &&
+                        attribute.Children[i].Children.Count > 0 &&
+                        attribute.Children[i].Children[0] is TemplateIntermediateNode template)
+                    {
+                        // We recognize templates as special form since we want to treat them differently than an expression.
+                        // Removing the expression from the tree makes this easier to recognize later.
+                        attribute.Children[i] = template;
                     }
                     else if (attribute.Children[i] is CSharpExpressionAttributeValueIntermediateNode expressionValue)
                     {
-                        attribute.Children[i] = new CSharpExpressionIntermediateNode()
+                        child = new CSharpExpressionIntermediateNode()
                         {
-                            Children =
-                            {
-                                expressionValue.Children.Single(),
-                            },
                             Source = expressionValue.Source,
                         };
+
+                        // As a special case here, remove any empty tokens. Templates in component attributes
+                        // get lowered with a trailing empty token, and it's will cause problems down the line.
+                        for (var j = 0; j < expressionValue.Children.Count; j++)
+                        {
+                            if (expressionValue.Children[j] is IntermediateToken token && string.IsNullOrEmpty(token.Content))
+                            {
+                                continue;
+                            }
+
+                            child.Children.Add(expressionValue.Children[j]);
+                        }
                     }
                     else if (attribute.Children[i] is CSharpCodeAttributeValueIntermediateNode codeValue)
                     {
-                        attribute.Children[i] = new CSharpExpressionIntermediateNode()
+                        child = new CSharpExpressionIntermediateNode()
                         {
-                            Children =
-                            {
-                                codeValue.Children.Single(),
-                            },
                             Source = codeValue.Source,
                         };
+
+                        for (var j = 0; j < codeValue.Children.Count; j++)
+                        {
+                            child.Children.Add(codeValue.Children[j]);
+                        }
+                    }
+
+                    if (child != null)
+                    {
+                        attribute.Children[i] = child;
                     }
                 }
             }
@@ -171,7 +197,22 @@ namespace Microsoft.AspNetCore.Blazor.Razor
                 // Each 'tag helper property' belongs to a specific tag helper. We want to handle
                 // the cases for components, but leave others alone. This allows our other passes
                 // to handle those cases.
-                _children.Add(node.TagHelper.IsComponentTagHelper() ? (IntermediateNode)new ComponentAttributeExtensionNode(node) : node);
+                var child = (IntermediateNode)node;
+                if (node.TagHelper.IsComponentTagHelper())
+                {
+                    child = new ComponentAttributeExtensionNode(node);
+
+                    // As a special case, simplify templates so they are easy to recognize later
+                    if (child.Children.Count == 1 &&
+                        child.Children[0] is CSharpExpressionIntermediateNode &&
+                        child.Children[0].Children.Count == 1 &&
+                        child.Children[0].Children[0] is TemplateIntermediateNode template)
+                    {
+                        child.Children[0] = template;
+                    }
+                }
+
+                _children.Add(child);
             }
 
             public override void VisitDefault(IntermediateNode node)

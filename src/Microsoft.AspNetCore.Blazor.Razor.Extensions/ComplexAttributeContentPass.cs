@@ -3,6 +3,7 @@
 
 using System.Linq;
 using Microsoft.AspNetCore.Razor.Language;
+using Microsoft.AspNetCore.Razor.Language.Extensions;
 using Microsoft.AspNetCore.Razor.Language.Intermediate;
 
 namespace Microsoft.AspNetCore.Blazor.Razor
@@ -73,17 +74,59 @@ namespace Microsoft.AspNetCore.Blazor.Razor
                 //
                 // There's a special case here for explicit expressions. See https://github.com/aspnet/Razor/issues/2203
                 // handling this case as a tactical matter since it's important for lambdas.
-                if (cSharpNode.Children.Count == 3 &&
-                    cSharpNode.Children[0] is IntermediateToken token0 &&
-                    cSharpNode.Children[2] is IntermediateToken token2 &&
-                    token0.Content == "(" &&
-                    token2.Content == ")")
                 {
-                    cSharpNode.Children.RemoveAt(2);
-                    cSharpNode.Children.RemoveAt(0);
+                    if (cSharpNode.Children.Count == 3 &&
+                        cSharpNode.Children[0] is IntermediateToken token0 &&
+                        cSharpNode.Children[2] is IntermediateToken token2 &&
+                        token0.Content == "(" &&
+                        token2.Content == ")")
+                    {
+                        cSharpNode.Children.RemoveAt(2);
+                        cSharpNode.Children.RemoveAt(0);
 
-                    // We were able to simplify it, all good.
-                    return false;
+                        // We were able to simplify it, all good.
+                        return false;
+                    }
+                }
+
+                // There's yet another special case when you have an attribute with a template
+                // like <div attr="@(@<div>Hi</div>)"
+                //
+                // This will look just like the above case except there are 4 tokens, and one of them is
+                // an empty C# token.
+                {
+                    if (cSharpNode.Children.Count == 4 &&
+                        cSharpNode.Children[0] is IntermediateToken token0 &&
+                        cSharpNode.Children[1] is TemplateIntermediateNode template &&
+                        cSharpNode.Children[2] is IntermediateToken token2 &&
+                        cSharpNode.Children[3] is IntermediateToken token3 &&
+                        token0.Content == "(" &&
+                        token2.Content == "" &&
+                        token3.Content == ")")
+                    {
+                        cSharpNode.Children.RemoveAt(3);
+                        cSharpNode.Children.RemoveAt(2);
+                        cSharpNode.Children.RemoveAt(0);
+
+                        // One other issue with this case is that the transition character @ will appear
+                        // inside a CSharpExpressionIntermediateNode in the template, which messes with compliation
+                        // because the editor thinks it's a verbatim identifier - used to escape a keyword, and so
+                        // the C# editor wants to remove the @.
+                        var expressions = template.FindDescendantNodes<CSharpExpressionIntermediateNode>();
+                        for (var i = 0; i < expressions.Count; i++)
+                        {
+                            var expression = expressions[i];
+                            if (expression.Children.Count > 0 &&
+                                expression.Children[0] is IntermediateToken transitionToken &&
+                                transitionToken.Content == "@")
+                            {
+                                expression.Children.RemoveAt(0);
+                            }
+                        }
+
+                        // We were able to simplify it, all good.
+                        return false;
+                    }
                 }
 
                 return true;

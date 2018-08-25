@@ -6,6 +6,7 @@ using AngleSharp.Extensions;
 using AngleSharp.Html;
 using AngleSharp.Parser.Html;
 using Microsoft.AspNetCore.Razor.Language;
+using Microsoft.AspNetCore.Razor.Language.Extensions;
 using Microsoft.AspNetCore.Razor.Language.Intermediate;
 using System;
 using System.Collections.Generic;
@@ -53,7 +54,7 @@ namespace Microsoft.AspNetCore.Blazor.Razor
         // that the content is properly nested, except at the top level of scope. And since the top
         // level isn't nested inside anything, we can't introduce any errors due to misunderstanding
         // the structure.
-        private class RewriteWalker : IntermediateNodeWalker
+        private class RewriteWalker : IntermediateNodeWalker, IExtensionIntermediateNodeVisitor<TemplateIntermediateNode>
         {
             private readonly RazorSourceDocument _source;
 
@@ -78,26 +79,75 @@ namespace Microsoft.AspNetCore.Blazor.Razor
 
                 if (foundHtml)
                 {
-                    RewriteChildren(_source, node);
+                    RewriteChildren(node);
                 }
             }
 
             public override void VisitHtmlAttribute(HtmlAttributeIntermediateNode node)
             {
                 // Don't rewrite inside of attributes
+
+                // Except for templates
+                var templates = node.FindDescendantNodes<TemplateIntermediateNode>();
+                for (var i =0; i < templates.Count; i++)
+                {
+                    VisitExtension(templates[i]);
+                }
+
             }
 
             public override void VisitTagHelperHtmlAttribute(TagHelperHtmlAttributeIntermediateNode node)
             {
                 // Don't rewrite inside of attributes
+
+                // Except for templates
+                var templates = node.FindDescendantNodes<TemplateIntermediateNode>();
+                for (var i = 0; i < templates.Count; i++)
+                {
+                    VisitExtension(templates[i]);
+                }
             }
 
             public override void VisitTagHelperProperty(TagHelperPropertyIntermediateNode node)
             {
                 // Don't rewrite inside of attributes
+
+                // Except for templates
+                var templates = node.FindDescendantNodes<TemplateIntermediateNode>();
+                for (var i = 0; i < templates.Count; i++)
+                {
+                    VisitExtension(templates[i]);
+                }
             }
 
-            private void RewriteChildren(RazorSourceDocument source, IntermediateNode node)
+            public void VisitExtension(TemplateIntermediateNode node)
+            {
+                // Templates have some special cases that we need to handle. When a template appears inside
+                // an attribute the compiler will lower markup as C# IntermediateToken, but lower actual c# expressions
+                // as CSharpExpressionIntermediateNode.
+                //
+                // We can correct this by turning them back into HTML content and then rewriting the node.
+                for (var i = 0; i < node.Children.Count; i++)
+                {
+                    if (node.Children[i] is IntermediateToken token && token.Kind == TokenKind.CSharp)
+                    {
+                        token.Kind = TokenKind.Html;
+                        node.Children[i] = new HtmlContentIntermediateNode()
+                        {
+                            Children =
+                            {
+                                token,
+                            },
+                            Source = token.Source,
+                        };
+                    }
+
+                }
+
+                RewriteChildren(node);
+            }
+
+            private void RewriteChildren(IntermediateNode node)
             {
                 // We expect all of the immediate children of a node (together) to comprise
                 // a well-formed tree of elements and components. 
@@ -122,7 +172,7 @@ namespace Microsoft.AspNetCore.Blazor.Razor
                 //
                 // We need to consume HTML until we see the 'end tag' for <foo /> and then we can 
                 // the attributes from the parsed HTML and the CSharpAttribute value.
-                var parser = new HtmlParser(source);
+                var parser = new HtmlParser(_source);
                 var attributes = new List<HtmlAttributeIntermediateNode>();
 
                 for (var i = 0; i < children.Length; i++)

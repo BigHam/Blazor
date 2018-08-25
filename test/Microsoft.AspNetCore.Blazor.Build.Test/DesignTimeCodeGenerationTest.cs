@@ -1030,5 +1030,219 @@ namespace Test
             AssertCSharpDocumentMatchesBaseline(generated.CodeDocument);
             CompileToAssembly(generated);
         }
+
+        [Fact]
+        public void RazorTemplate_InCodeBlock()
+        {
+            // Arrange
+
+            // Act
+            var generated = CompileToCSharp(@"
+@{
+    RenderFragment<Person> p = @<div>@item.Name</div>;
+}
+@functions {
+    class Person
+    {
+        public string Name { get; set; }
+    }
+}");
+
+            // Assert
+            AssertDocumentNodeMatchesBaseline(generated.CodeDocument);
+            AssertCSharpDocumentMatchesBaseline(generated.CodeDocument);
+            CompileToAssembly(generated);
+        }
+
+
+        [Fact]
+        public void RazorTemplate_InExplicitExpression()
+        {
+            // Arrange
+
+            // Act
+            var generated = CompileToCSharp(@"
+@(RenderPerson(@<div>@item.Name</div>))
+@functions {
+    class Person
+    {
+        public string Name { get; set; }
+    }
+
+    object RenderPerson(RenderFragment<Person> p) => null;
+}");
+
+            // Assert
+            AssertDocumentNodeMatchesBaseline(generated.CodeDocument);
+            AssertCSharpDocumentMatchesBaseline(generated.CodeDocument);
+            CompileToAssembly(generated);
+        }
+
+        [Fact]
+        public void RazorTemplate_InImplicitExpression()
+        {
+            // Arrange
+
+            // Act
+            var generated = CompileToCSharp(@"
+@RenderPerson(@<div>@item.Name</div>)
+@functions {
+    class Person
+    {
+        public string Name { get; set; }
+    }
+
+    object RenderPerson(RenderFragment<Person> p) => null;
+}");
+
+            // Assert
+            AssertDocumentNodeMatchesBaseline(generated.CodeDocument);
+            AssertCSharpDocumentMatchesBaseline(generated.CodeDocument);
+            CompileToAssembly(generated);
+        }
+
+        [Fact]
+        public void RazorTemplate_ContainsComponent()
+        {
+            // Arrange
+            AdditionalSyntaxTrees.Add(Parse(@"
+using Microsoft.AspNetCore.Blazor.Components;
+
+namespace Test
+{
+    public class MyComponent : BlazorComponent
+    {
+        [Parameter] string Name { get; set; }
+    }
+}
+"));
+
+            // Act
+            var generated = CompileToCSharp(@"
+@addTagHelper ""*, TestAssembly""
+@{
+    RenderFragment<Person> p = @<div><MyComponent Name=""@item.Name""/></div>;
+}
+@functions {
+    class Person
+    {
+        public string Name { get; set; }
+    }
+}");
+
+            // Assert
+            AssertDocumentNodeMatchesBaseline(generated.CodeDocument);
+            AssertCSharpDocumentMatchesBaseline(generated.CodeDocument);
+            CompileToAssembly(generated);
+        }
+        
+        // Targeted at the logic that assigns 'builder' names
+        [Fact]
+        public void RazorTemplate_FollowedByComponent()
+        {
+            // Arrange
+            AdditionalSyntaxTrees.Add(Parse(@"
+using Microsoft.AspNetCore.Blazor.Components;
+
+namespace Test
+{
+    public class MyComponent : BlazorComponent
+    {
+        [Parameter] string Name { get; set; }
+    }
+}
+"));
+
+            // Act
+            var generated = CompileToCSharp(@"
+@addTagHelper ""*, TestAssembly""
+@{
+    RenderFragment<Person> p = @<div><MyComponent Name=""@item.Name""/></div>;
+}
+<MyComponent>
+@(""hello, world!"")
+</MyComponent>
+
+@functions {
+    class Person
+    {
+        public string Name { get; set; }
+    }
+}");
+
+            // Assert
+            AssertDocumentNodeMatchesBaseline(generated.CodeDocument);
+            AssertCSharpDocumentMatchesBaseline(generated.CodeDocument);
+            CompileToAssembly(generated);
+        }
+
+        [Fact]
+        public void RazorTemplate_AsComponentParameter()
+        {
+            // Arrange
+            AdditionalSyntaxTrees.Add(Parse(@"
+using Microsoft.AspNetCore.Blazor;
+using Microsoft.AspNetCore.Blazor.Components;
+
+namespace Test
+{
+    public class MyComponent : BlazorComponent
+    {
+        [Parameter] RenderFragment<Person> PersonTemplate { get; set; }
+    }
+
+    public class Person
+    {
+        public string Name { get; set; }
+    }
+}
+"));
+
+            // Act
+            var generated = CompileToCSharp(@"
+@addTagHelper ""*, TestAssembly""
+<MyComponent PersonTemplate=""@(@<div>@item.Name</div>)""/>
+");
+
+            // Assert
+            AssertDocumentNodeMatchesBaseline(generated.CodeDocument);
+            AssertCSharpDocumentMatchesBaseline(generated.CodeDocument);
+            CompileToAssembly(generated);
+        }
+
+        [Fact]
+        public void RazorTemplate_AsComponentParameter_MixedContent()
+        {
+            // Arrange
+            AdditionalSyntaxTrees.Add(Parse(@"
+using Microsoft.AspNetCore.Blazor;
+using Microsoft.AspNetCore.Blazor.Components;
+
+namespace Test
+{
+    public class MyComponent : BlazorComponent
+    {
+        [Parameter] RenderFragment<Context> Template { get; set; }
+    }
+
+    public class Context
+    {
+        public int Index { get; set; }
+        public string Item { get; set; }
+    }
+}
+"));
+
+            // Act
+            var generated = CompileToCSharp(@"
+@addTagHelper ""*, TestAssembly""
+<MyComponent Template=""@(@<li>#@item.Index - @item.Item.ToLower()</li>)""/>
+");
+
+            // Assert
+            AssertDocumentNodeMatchesBaseline(generated.CodeDocument);
+            AssertCSharpDocumentMatchesBaseline(generated.CodeDocument);
+            CompileToAssembly(generated);
+        }
     }
 }

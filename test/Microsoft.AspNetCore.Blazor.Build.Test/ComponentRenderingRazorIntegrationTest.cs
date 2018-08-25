@@ -554,5 +554,57 @@ namespace Test
                 frame => AssertFrame.Text(frame, "hi", 14),
                 frame => AssertFrame.Markup(frame, "\n      <div></div>\n  ", 15));
         }
+
+        [Fact]
+        public void RazorTemplate_CanBeUsedFromComponent()
+        {
+            // Arrange
+            AdditionalSyntaxTrees.Add(Parse(@"
+using Microsoft.AspNetCore.Blazor;
+using Microsoft.AspNetCore.Blazor.Components;
+using Microsoft.AspNetCore.Blazor.RenderTree;
+
+namespace Test
+{
+    public class Repeater : BlazorComponent
+    {
+        [Parameter] int Count { get; set; }
+        [Parameter] RenderFragment<string> Template { get; set; }
+        [Parameter] string Value { get; set; }
+
+        protected override void BuildRenderTree(RenderTreeBuilder builder)
+        {
+            base.BuildRenderTree(builder);
+            for (var i = 0; i < Count; i++)
+            {
+                builder.AddContent(i, Template, Value);
+            }
+        }
+    }
+}
+"));
+
+            var component = CompileToComponent(@"
+@addTagHelper ""*, TestAssembly""
+<Repeater Count=3 Value=""Hello, World!"" Template=""@(@<div>@item.ToLower()</div>)"" />
+");
+
+            // Act
+            var frames = GetRenderTree(component);
+
+            // Assert
+            Assert.Collection(
+                frames,
+                frame => AssertFrame.Component(frame, "Test.Repeater", 4, 0),
+                frame => AssertFrame.Attribute(frame, "Count", typeof(int), 1),
+                frame => AssertFrame.Attribute(frame, "Value", typeof(string), 2),
+                frame => AssertFrame.Attribute(frame, "Template", typeof(RenderFragment<string>), 3),
+                frame => AssertFrame.Element(frame, "div", 2, 4),
+                frame => AssertFrame.Text(frame, "hello, world!", 5),
+                frame => AssertFrame.Element(frame, "div", 2, 4),
+                frame => AssertFrame.Text(frame, "hello, world!", 5),
+                frame => AssertFrame.Element(frame, "div", 2, 4),
+                frame => AssertFrame.Text(frame, "hello, world!", 5));
+        }
     }
 }
